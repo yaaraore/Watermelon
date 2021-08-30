@@ -5,7 +5,7 @@ For any addiotnal code request or questions please email me (yoren@broadinstitut
 This project contains two directories code and data.
 
 The code directory contains:
-  1) R script 
+  1) R script - this is for
   2) R script 
  
 The data directory contains
