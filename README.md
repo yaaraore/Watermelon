@@ -6,7 +6,7 @@ This project contains two directories Code and Data.
 
 The Code directory contains:
 
-  1)R script 10X_WTA_dialOut.md- this script created a cell-barcode:lineage-barcode directory based on a dialout-PCR of watermelon mammalian lines 
+  1)R script 10X_WTA_dialOut.md- this script creates a cell-barcode:lineage-barcode directory based on a dialout-PCR of watermelon mammalian lines 
   
   2)R script plasmid_pool_barcode_dialOut- this script is used to assess complexity of a watermelon plasmid pool. It is typically used on a dialout-PCR of a             bacterial maxi prep
   
