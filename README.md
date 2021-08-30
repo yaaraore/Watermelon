@@ -12,10 +12,10 @@ The Code directory contains:
   
 The Data directory contains:
 
-  1)V3 Seurat R objects pc9_time_course.rds- transcriptome of PC9-watermelon cell lines across osimertinib treatment. Lineage barcodes are marked in the metadata       file associated with the Seurat objects (dim: 22166 56419)
+  1)V3 Seurat R objects pc9_time_course.rds- transcriptome of PC9-watermelon cell lines across osimertinib treatment. Lineage barcodes are marked in the metadata       file associated with the Seurat objects (dim: 22166 56419).
   
   2)V3 Seurat R objects pooled_persisters.rds-transcriptome of multiple watermelon cell lines at day 0 and 10 of drug treatment. Cell line identity
-  is marked in the metadata file associated with the Seurat object.
+  is marked in the metadata file associated with the Seurat object (dim: 23168 50735).
   
-  Both objects can be loaded using the readRDS R function if the Seurat library is loaded (dim: 23168 50735)
+  Both objects can be loaded using the readRDS R function if the Seurat library is loaded 
 
