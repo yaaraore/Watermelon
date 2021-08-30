@@ -1,0 +1,214 @@
+---
+title: "10X_WTA_dialOut"
+author: "yaara"
+date: "6/23/2021"
+output: html_document
+---
+
+
+#### Mapping lineage onto 10x single cell data using WTA dial out 
+this script analysis the WM libray 10X WTA dial out
+Input:
+1. R1 fastq miseq dial out 
+2. R2 fastq miseq dial out 
+3.barcodes.tsv.gz file from the cell ranger pipeline that marks pass filter cell barcodes 
+4. the cell ranger assigned sample number (default for 10X for a single sample is "-1")
+
+Output:
+A two column table that can be added to a seurat metadata object which marks the lineage identity of each cell
+
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library('ggplot2')
+```
+
+
+
+##load input files :dial-out fastqs and 10X 
+```{r  load fastq }
+library("ShortRead")
+
+#for fastq files
+dir_path="/Volumes/BreastSeq2/Me/lineageTracing/22.12.20_pooled_persisters/dialout/fastq/" #fastq dir path for dial out 
+output_dir="/Volumes/BreastSeq2/Me/lineageTracing/22.12.20_pooled_persisters/dialout/"     #path for final output file
+
+R1_fq_da <-readFastq(dir_path, pattern="SM-K5PNV_S3_L001_R1_001.fastq.gz") #dial out R1 read
+R2_fq_da <-readFastq(dir_path, pattern="SM-K5PNV_S3_L001_R2_001.fastq.gz") #dial out R2 read
+
+#all 10x that corresponds to valid cells
+valid.10Xcell.barcodes.df=read.table("/Volumes/BreastSeq2/Me/lineageTracing/22.12.20_pooled_persisters/aggregated/all_experiments/outs/filtered_feature_bc_matrix/barcodes.tsv.gz",sep = "-")
+
+valid.10Xcell.barcodes=valid.10Xcell.barcodes.df$V1
+```
+
+
+###initailaize result data frame 
+```{r initialize summary data frame}
+summary.df  <- as.data.frame(matrix(0, ncol = 2, nrow = 2))
+rownames(summary.df )=c("10x.cell.barcodes", "lineage.barcodes")
+colnames(summary.df )=c("dial-out","10x.sequencing")
+
+```
+
+
+###read (dial-out+10x) data to data frame  
+```{r read dial-out}
+library(data.table)
+
+###extract sequnces from fastq 
+
+R1_seq_da=as.character(R1_fq_da@sread) #for dial-out
+R2_seq_da=as.character(R2_fq_da@sread) #for dial-out:
+
+#genrate df
+dailOut.df=as.data.frame(cbind(R1_seq_da,R2_seq_da)) #this create a df from the miseq fastq
+
+#create a new col for 10x cell index (first 16bp)
+dailOut.df$cell_10x_barcode=gsub("^([ATCG]{16}).*","\\1",dailOut.df$R1,perl=TRUE )
+
+#mark the cell barcodes detected in the dial out before doing any filtering on lineage barocode
+summary.df[1,1]=sum(valid.10Xcell.barcodes %in% dailOut.df$cell_10x_barcode)/length(valid.10Xcell.barcodes)*100
+
+#subset to a dataset contain only valid cell barcodes (valid=cells that were detected in 10X run) 
+dailOut.df=subset(dailOut.df, dailOut.df$cell_10x_barcode %in% valid.10Xcell.barcodes.df$V1)
+
+
+#collapse df to contain only unique lines 
+dailOut.df=unique(dailOut.df)
+
+#mark umi of each read (last 10bp of read R1)
+dailOut.df$umi=gsub("^[ATCG]{16}(.*)","\\1",dailOut.df$R1,perl=TRUE )
+
+#create a new col for the lineage barcode index (include only if there are perfect matched on side of barcode)
+dailOut.df$lineage_barcode<-gsub(".*GTCTTC(([AT][CG]|[CG][AT]){15})GAAGAC.*","\\1",dailOut.df$R2_seq_da,perl=TRUE )
+
+#subset to dataset contain only reads that have valid linaege barcodes that follow the semi random role
+dailOut.df=subset(dailOut.df,nchar(dailOut.df$lineage_barcode) == 30)
+
+#remove two seq col 
+dailOut.df=dailOut.df[,3:5]
+
+
+#calculate how many umi's support every combination of lineage barcode and cell barcode 
+LB.CB_pair_umiCount.df=setDT(dailOut.df)[, .(count = uniqueN(umi)), by =list(cell_10x_barcode,lineage_barcode) ]
+
+
+
+###helper function to collapse barcodes
+
+CollapseLineageBarcodes <- function(single_10x_bc.df){
+
+#how many umi support this 10x barcode
+original_umi_count=sum(single_10x_bc.df$count)
+
+#order such that the most supported pair would be the first 
+single_10x_bc.df=single_10x_bc.df[order(-single_10x_bc.df$count),]
+
+#create a vector of all lineage barcodes
+str<- single_10x_bc.df$lineage_barcode
+
+# Levenshtein Distance of all lineage barcodes
+str<- single_10x_bc.df$lineage_barcode
+d  <- adist(str)
+
+
+#add a col with edit distance to most common lineage barcode
+single_10x_bc.df$edist_to_most_common_LB= d[1, ]
+
+# go over data frame and remove any row that has an edit distance of 3 or less 
+single_10x_bc.df=single_10x_bc.df[!(single_10x_bc.df$edist_to_most_common_LB<4 & single_10x_bc.df$edist_to_most_common_LB>0),]
+
+#calculate how many umi were subtracted and add these umis to the most common barcode
+single_10x_bc.df$count[1]=single_10x_bc.df$count[1]+original_umi_count-sum(single_10x_bc.df$count)
+
+#if after collapsing the less supported lineages are supported only by one barcode and the leading barcode is larger the 5-remove these rows
+#mark top count 
+top_count=single_10x_bc.df$count[1]
+
+#remove all pairs where the support in 3 times smaller compared to the top pair
+single_10x_bc.df=single_10x_bc.df[!(single_10x_bc.df$count*3<top_count),]
+
+
+
+return(single_10x_bc.df)
+}
+
+# collapsed on all pairs LB.CB_pair_umiCount.df with the CollapseLineageBarcodes function
+LB.CB_pair_umiCount.df<-setDT(LB.CB_pair_umiCount.df)[, CollapseLineageBarcodes(.SD), by=cell_10x_barcode, .SDcols=c("lineage_barcode", "count")]
+
+```
+
+
+#remove cell-lineage barcode pair that are supported by less than 3 umi
+```{r filter pairs by umi support}
+LB.CB_pair_umiCount.df=LB.CB_pair_umiCount.df[LB.CB_pair_umiCount.df$count>2,]
+```
+
+#plot cell-lineage barcode pair by umi support
+```{r LB support}
+#plot Number of umi supporting the most common  adjoining lineage barcode in the 10X
+max.umi.per.cell=setDT(LB.CB_pair_umiCount.df)[, .(max = max(count)), by =list(cell_10x_barcode) ]
+
+ggplot(max.umi.per.cell
+, aes(x=max))+theme(axis.text=element_text(size=18,face="bold"), axis.title=element_text(size=16,face="bold")) + geom_histogram(aes(y=..count../sum(..count..)),binwidth = 0.6)+xlab("Number of umi supporting the most common lineage barcode")+ylab("Fraction of cells")+ggtitle("Number of umi supporting the most common lineage barcode") 
+
+```
+
+
+#what is the edit distance between lineage barcodes 
+```{r edit distance, echo=FALSE}
+
+#create dist matrix 
+m=adist(unique(LB.CB_pair_umiCount.df$cell_10x_barcode))
+
+#get only lower triangular 
+m[lower.tri(m,diag =T)] <- NA
+
+#calc min dis
+min.dist=as.data.frame(apply(m,2,min,na.rm=T))
+
+#remove first row which is inf 
+
+min.dist=as.data.frame(min.dist[-1,])
+
+names(min.dist)="min.dist"
+
+#plot
+ggplot(min.dist
+, aes(x=min.dist))+theme(axis.text=element_text(size=18,face="bold"), axis.title=element_text(size=16,face="bold")) + geom_histogram(fill="blue",binwidth=0.5,alpha = 0.5)+xlab("minimum pairwise edit distance")+ylab("Number of lineage barcodes")+ggtitle("Minimum pairwise edit distance between vaild lineage barcodes") +theme_classic()
+```
+
+
+#how many lineage bacodes a cell has?
+```{r lineage barcodes per cell, echo=FALSE}
+library(plyr)
+
+#how many  lineage barcode a cell has?
+lineagePerCell.dist.df=ddply(LB.CB_pair_umiCount.df,~cell_10x_barcode,summarise,number_of_lineage_barcodes=length(unique(lineage_barcode)))
+
+ggplot(lineagePerCell.dist.df
+, aes(x=number_of_lineage_barcodes))+theme(axis.text=element_text(size=18,face="bold"), axis.title=element_text(size=16,face="bold")) + geom_histogram(aes(y=..count../sum(..count..)),fill="blue",binwidth=0.5,alpha = 0.5)+xlab("Number of lineage barcodes associcated with a cell")+ylab("Fraction of cells")+ggtitle("10x data-How many lineage barcodes a cell has?") +scale_x_continuous(breaks=0:3)
+
+
+
+```
+
+
+#gernerate table that can be added to seurat object as a metadata col
+```{r metadata table, echo=FALSE}
+library(reshape)
+
+#write cell barcode -lineage barocde pairs to a table 
+seurat.meta.db = cast(LB.CB_pair_umiCount.df, cell_10x_barcode ~ ., value="lineage_barcode", fun.aggregate=function(x){paste(x, collapse=",")})
+names(seurat.meta.db)=c("cell_10x_barcode","lineage_barcode")
+
+#this needs to adjusted manually to sample number - default for 10X for a single sample is "-1"
+seurat.meta.db$cell_10x_barcode=paste0(seurat.meta.db$cell_10x_barcode,"-1")
+
+write.table(seurat.meta.db,paste0(output_dir,"cellBarcode-lineageBarcode_table.txt"),quote = F,row.names = F)
+
+head(seurat.meta.db)
+```
+
