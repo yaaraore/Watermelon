@@ -2,7 +2,7 @@
 Data and code related to the paper:cycling cancer persister cells arise from lineages with distinct programs (https://www.nature.com/articles/s41586-021-03796-6)
 For any addiotnal code requests or questions please email me (yoren@broadinstitute.org). 
 
-This project contains two directories code and data.
+This project contains two directories Code and Data.
 
 The Code directory contains:
 
